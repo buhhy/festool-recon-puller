@@ -19,7 +19,8 @@ from oauth2client.service_account import ServiceAccountCredentials
 # gsuite_credentials = {...}
 # email_recipient = '...'
 # gsheet_id = '...'
-# debug_mode = false
+
+# Use with --debug to do dry-runs only
 
 
 root_url = "https://www.festoolrecon.com"
