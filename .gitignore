@@ -1,2 +1,5 @@
 secrets.py
 __pycache__
+output.log
+.env
+env
