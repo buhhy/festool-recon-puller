@@ -25,6 +25,10 @@ from oauth2client.service_account import ServiceAccountCredentials
 
 root_url = "https://www.festoolrecon.com"
 
+def debug_print(str):
+  if args.debug:
+    print(f'[debug] {str}')
+
 def convert_currency(value):
   code = get_currency_symbol('USD');
   return parse_decimal(value.strip(code), locale='en_US')
@@ -53,7 +57,9 @@ def send_email(insert_rows, update_rows, unchanged_rows):
     f'Still on sale:  {''.join([f"\n\t{t[2]}" for t in update_rows])}')
 
   if args.debug:
-    print(f'[Debug] Email message: \n{msg}')
+    debug_print(f'Email message: \n{msg}')
+
+  if args.dryrun or args.debug:
     return
 
   # connect to the Gmail SMTP server and send the message
@@ -68,12 +74,12 @@ def extract_collection(soup):
     url = collection_link.get('href')
     if not url.startswith('http'):
       url = f'{root_url}{url}'
-    print(f'Collection page found, navigating to <{url}>')
+    debug_print(f'Collection page found, navigating to <{url}>')
 
     with urlopen(url) as collection_page_response:
       collection_page = BeautifulSoup(collection_page_response.read(), features="html.parser")
       if args.debug:
-        print(f"[Debug] Multiple products:")
+        debug_print(f"Multiple products found:")
       products = []
 
       for card_el in collection_page.select('.product-card__info'):
@@ -102,7 +108,8 @@ def write_to_google_sheets(products):
   client = gspread.service_account_from_dict(gsuite_credentials)
 
   # Open the Google Sheet by ID
-  sheet = client.open_by_key(gsheet_id).sheet1
+  gsheet = client.open_by_key(gsheet_id)
+  sheet = gsheet.worksheets()[1] if args.devel else gsheet.sheet1
 
   all_rows = sheet.get_all_values()[1:]
 
@@ -129,20 +136,37 @@ def write_to_google_sheets(products):
   update_rows = [[t[0], current_datetime_str, *t[2:5]] for t in matched_stored_products]
   unchanged_rows = [t[0:5] for t in collection_rows if t[2] not in matched_stored_product_names]
 
-  print(f'Updated rows: {''.join([f"\n  {t}" for t in update_rows])}')
-  print(f'Inserting rows: {''.join([f"\n  {t}" for t in insert_rows])}')
-  print(f'Unchanged rows: {''.join([f"\n  {t}" for t in unchanged_rows])}')
+  if len(insert_rows) > 0:
+    debug_print(f'Inserting rows: {''.join([f"\n  {t}" for t in insert_rows])}')
+  if len(update_rows) > 0:
+    debug_print(f'Updated rows: {''.join([f"\n  {t}" for t in update_rows])}')
+  if len(unchanged_rows) > 0:
+    debug_print(f'Removed rows: {''.join([f"\n  {t}" for t in unchanged_rows])}')
 
-  if args.debug:
-    print('Debug mode: skipping write to Google Sheets and sending email...')
-  else:
-    print(f'Writing {len(insert_rows)} new rows, {len(update_rows)} updated rows, {len(unchanged_rows)} unchanged rows')
-    if len(update_rows) > 0:
-      sheet.update(range_name = f'A2:E{2 + len(update_rows)}', values = update_rows)
-    if len(unchanged_rows) > 0:
-      sheet.update(range_name = f'A2:E{2 + len(update_rows) + len(unchanged_rows)}', values = unchanged_rows)
-    # If there are new products, insert into sheet and send email.
-    if len(insert_rows) > 0:
+  if args.dryrun:
+    print('Dry-run mode: skipping write to Google Sheets and sending email...')
+
+  print(f'Writing {len(insert_rows)} new rows, {len(update_rows)} updated rows, {len(unchanged_rows)} removed rows')
+  update_index_start = 2
+  remove_index_start = update_index_start + len(update_rows)
+  update_index_end = remove_index_start - 1
+  remove_index_end = remove_index_start + len(unchanged_rows) - 1
+
+  if len(update_rows) > 0:
+    update_range = f'A{update_index_start}:E{update_index_end}'
+    debug_print(f'Updated rows range: {update_range}')
+    if not args.dryrun:
+      sheet.update(range_name = update_range, values = update_rows)
+
+  if len(unchanged_rows) > 0:
+    update_range = f'A{remove_index_start}:E{remove_index_end}'
+    debug_print(f'Removed rows range: {update_range}')
+    if not args.dryrun:
+      sheet.update(range_name = update_range, values = unchanged_rows)
+
+  # If there are new products, insert into sheet and send email.
+  if len(insert_rows) > 0:
+    if not args.dryrun:
       sheet.insert_rows(insert_rows, 2)
 
   if len(unchanged_rows) > 0 or len(insert_rows) > 0:
@@ -156,19 +180,39 @@ def write_to_google_sheets(products):
 # Create the argument parser
 arg_parser = argparse.ArgumentParser(description="Festool recon site scraper.")
 
-# Add the optional --debug flag (default is False)
+# Default is False
 arg_parser.add_argument(
-  '--debug',       # The flag itself (optional)
-  action='store_true',  # If the flag is provided, store True
-  help='Enable debug mode'  # Description of what the flag does
+  '--debug',
+  action='store_true',
+  help='If set, use debug logging'
 )
+
+# Default is False
+arg_parser.add_argument(
+  '--devel',
+  action='store_true',
+  help='Enable writing to devel sheet'
+)
+
+# Default is False
+arg_parser.add_argument(
+  '--dryrun',
+  action='store_true',
+  help='If set, do not write to Google sheets or send email'
+)
+
 
 # Parse the command-line arguments
 args = arg_parser.parse_args()
 
-# Check if --debug flag was provided
+# Check if --debug flag is true
 if args.debug:
-    print("Running in  debug mode...")
+  print("Running in debug mode...")
+# Check if --devel flag is true
+if args.devel:
+  print("Running in devel mode, reading and writing to devel sheet...")
+if args.dryrun:
+  print("Running in dry run mode, not writing to sheet...")
 
 with urlopen(root_url) as response:
   soup = BeautifulSoup(response.read(), features="html.parser")
@@ -182,8 +226,7 @@ with urlopen(root_url) as response:
     sale_price = convert_currency(soup.select_one("#ProductPrice-product-template").getText().strip())
     products = [(product_title, original_price, sale_price)]
 
-    if args.debug:
-      print(f"Single product: {product_title} - {original_price} - {sale_price}")
+    debug_print(f"Single product: {product_title} - {original_price} - {sale_price}")
   else:
     products = extract_collection(soup)
 
