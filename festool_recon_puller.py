@@ -33,28 +33,17 @@ def convert_currency(value):
   code = get_currency_symbol('USD');
   return parse_decimal(value.strip(code), locale='en_US')
 
-def send_email(insert_rows, update_rows, unchanged_rows):
+def send_email(subject: str, email_recipient: str, content: str):
   if not email_password or not email_sender:
     print('No email sender or password found.')
     return
 
-  subject = 'changes in product inventory'
-  if len(insert_rows) == 1:
-    subject = insert_rows[0][2]
-  elif len(insert_rows) > 0:
-    subject = f'{len(insert_rows)} new products'
-  elif len(unchanged_rows) > 0:
-    subject = f'{len(insert_rows)} out-of-stock products'
-
   # create the message object
   msg = EmailMessage()
-  msg['Subject'] = f'[Festool Recon] - {subject}'
+  msg['Subject'] = subject
   msg['From'] = email_sender
   msg['To'] = email_recipient
-  msg.set_content(
-    f'New products:  {''.join([f"\n\t{t[2]} - ${t[4]} / ${t[3]}" for t in insert_rows])}\n\n'
-    f'Sold out products:  {''.join([f"\n\t{t[2]}" for t in unchanged_rows])}\n\n'
-    f'Still on sale:  {''.join([f"\n\t{t[2]}" for t in update_rows])}')
+  msg.set_content(content)
 
   if args.debug:
     debug_print(f'Email message: \n{msg}')
@@ -67,6 +56,50 @@ def send_email(insert_rows, update_rows, unchanged_rows):
     smtp.login(email_sender, email_password)
     smtp.send_message(msg)
     print(f'Email sent from {email_sender}')
+
+
+def send_update_email(insert_rows, update_rows, unchanged_rows):
+  if not email_password or not email_sender:
+    print('No email sender or password found.')
+    return
+
+  subject = 'changes in product inventory'
+  if len(insert_rows) == 1:
+    subject = insert_rows[0][2]
+  elif len(insert_rows) > 0:
+    subject = f'{len(insert_rows)} new products'
+  elif len(unchanged_rows) > 0:
+    subject = f'{len(insert_rows)} out-of-stock products'
+
+  msg = (f'New products:  {''.join([f"\n\t{t[2]} - ${t[4]} / ${t[3]}" for t in insert_rows])}\n\n'
+    f'Sold out products:  {''.join([f"\n\t{t[2]}" for t in unchanged_rows])}\n\n'
+    f'Still on sale:  {''.join([f"\n\t{t[2]}" for t in update_rows])}')
+
+  send_email(f'[Festool Recon] - {subject}', email_recipient, msg)
+
+  if any('ROTEX RO 150' in row[2] for row in insert_rows):
+    send_txt('6503907826', 'RO 150 on sale!', msg)
+
+
+
+def send_txt(
+    phone_num: str, msg: str, subject: str
+):
+  # https://kb.sandisk.com/app/answers/detail/a_id/17056/~/list-of-mobile-carrier-gateway-addresses
+  # https://www.gmass.co/blog/send-text-from-gmail/
+  CARRIER_MAP = {
+      "verizon": "vtext.com",
+      "tmobile": "tmomail.net",
+      "sprint": "messaging.sprintpcs.com",
+      "at&t": "txt.att.net",
+      "boost": "smsmyboostmobile.com",
+      "cricket": "sms.cricketwireless.net",
+      "uscellular": "email.uscc.net",
+  }
+
+  domain = CARRIER_MAP['at&t']
+  send_email(subject, f'{phone_num}@{domain}', msg)
+
 
 def extract_collection(soup):
   collection_link = soup.select_one('a.collection-card')
@@ -171,10 +204,9 @@ def write_to_google_sheets(products):
 
   if len(unchanged_rows) > 0 or len(insert_rows) > 0:
     print('Sending email for product changes')
-    send_email(insert_rows, update_rows, unchanged_rows)
+    send_update_email(insert_rows, update_rows, unchanged_rows)
   else:
     print('No product changes, not sending email')
-
 
 
 # Create the argument parser
@@ -202,6 +234,7 @@ arg_parser.add_argument(
 )
 
 
+
 # Parse the command-line arguments
 args = arg_parser.parse_args()
 
@@ -213,6 +246,7 @@ if args.devel:
   print("Running in devel mode, reading and writing to devel sheet...")
 if args.dryrun:
   print("Running in dry run mode, not writing to sheet...")
+
 
 with urlopen(root_url) as response:
   soup = BeautifulSoup(response.read(), features="html.parser")
