@@ -78,12 +78,13 @@ def send_update_email(insert_rows, update_rows, unchanged_rows):
   send_email(f'[Festool Recon] - {subject}', email_recipient, msg)
 
   if any('ROTEX RO 150' in row[2] for row in insert_rows):
-    send_txt('6503907826', 'RO 150 on sale!', msg)
+    print('Matched watchlist, sending text!')
+    send_txt('6503907826', 'RO 150 on sale!', ''.join([f"{t[2]} - ${t[4]} / ${t[3]}\n" for t in insert_rows]))
 
 
 
 def send_txt(
-    phone_num: str, msg: str, subject: str
+    phone_num: str, subject: str, msg: str
 ):
   # https://kb.sandisk.com/app/answers/detail/a_id/17056/~/list-of-mobile-carrier-gateway-addresses
   # https://www.gmass.co/blog/send-text-from-gmail/
