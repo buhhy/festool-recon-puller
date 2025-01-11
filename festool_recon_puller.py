@@ -12,6 +12,7 @@ from urllib.request import urlopen
 from bs4 import BeautifulSoup
 from babel.numbers import parse_decimal, get_currency_symbol
 from oauth2client.service_account import ServiceAccountCredentials
+from collections import namedtuple
 
 # from secrets.py:
 # email_sender = '...'
@@ -22,6 +23,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 
 # Use with --debug to do dry-runs only
 
+WatchedItem = namedtuple('WatchedItem', ['keyword', 'message'])
 
 root_url = "https://www.festoolrecon.com"
 
@@ -48,7 +50,7 @@ def send_email(subject: str, email_recipient: str, content: str):
   if args.debug:
     debug_print(f'Email message: \n{msg}')
 
-  if args.dryrun or args.debug:
+  if args.dryrun:
     return
 
   # connect to the Gmail SMTP server and send the message
@@ -58,7 +60,7 @@ def send_email(subject: str, email_recipient: str, content: str):
     print(f'Email sent from {email_sender}')
 
 
-def send_update_email(insert_rows, update_rows, unchanged_rows):
+def send_update_email(insert_rows, update_rows, unchanged_rows, watchlist):
   if not email_password or not email_sender:
     print('No email sender or password found.')
     return
@@ -77,9 +79,10 @@ def send_update_email(insert_rows, update_rows, unchanged_rows):
 
   send_email(f'[Festool Recon] - {subject}', email_recipient, msg)
 
-  if any('ROTEX RO 150' in row[2] for row in insert_rows):
-    print('Matched watchlist, sending text!')
-    send_txt('6503907826', 'RO 150 on sale!', ''.join([f"{t[2]} - ${t[4]} / ${t[3]}\n" for t in insert_rows]))
+  for item in watchlist:
+    if any(item.keyword in row[2] for row in insert_rows):
+      print(f'Matched watchlist for keyword [{item.keyword}], sending text!')
+      send_txt('6503907826', f'{item.message} on sale!', ''.join([f"{t[2]} - ${t[4]} / ${t[3]}\n" for t in insert_rows]))
 
 
 
@@ -143,7 +146,7 @@ def write_to_google_sheets(products):
 
   # Open the Google Sheet by ID
   gsheet = client.open_by_key(gsheet_id)
-  sheet = gsheet.worksheets()[1] if args.devel else gsheet.sheet1
+  sheet = gsheet.worksheet('Devel') if args.devel else gsheet.worksheet('Main')
 
   all_rows = sheet.get_all_values()[1:]
 
@@ -203,9 +206,13 @@ def write_to_google_sheets(products):
     if not args.dryrun:
       sheet.insert_rows(insert_rows, 2)
 
+  # Retrieve the watchlist.
+  watchlist = [WatchedItem(row[0], row[1]) for row in gsheet.worksheet('Watchlist').get_all_values()[1:]]
+  debug_print(f'Watched items: {watchlist}')
+
   if len(unchanged_rows) > 0 or len(insert_rows) > 0:
     print('Sending email for product changes')
-    send_update_email(insert_rows, update_rows, unchanged_rows)
+    send_update_email(insert_rows, update_rows, unchanged_rows, watchlist)
   else:
     print('No product changes, not sending email')
 
