@@ -77,12 +77,13 @@ def send_update_email(insert_rows, update_rows, unchanged_rows, watchlist):
     f'Sold out products:  {''.join([f"\n\t{t[2]}" for t in unchanged_rows])}\n\n'
     f'Still on sale:  {''.join([f"\n\t{t[2]}" for t in update_rows])}')
 
-  send_email(f'[Festool Recon] - {subject}', email_recipient, msg)
-
   for item in watchlist:
     if any(item.keyword in row[2] for row in insert_rows):
       print(f'Matched watchlist for keyword [{item.keyword}], sending text!')
-      send_txt('6503907826', f'{item.message} on sale!', ''.join([f"{t[2]} - ${t[4]} / ${t[3]}\n" for t in insert_rows]))
+      # Reduce spam by only sending emails for watched items.
+      send_email(f'[Festool Recon] - {subject}', email_recipient, msg)
+      # AT&T has disabled email to text functionality...
+      # send_txt('6503907826', f'{item.message} on sale!', ''.join([f"{t[2]} - ${t[4]} / ${t[3]}\n" for t in insert_rows]))
 
 
 
